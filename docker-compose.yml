@@ -1,0 +1,40 @@
+version: '3.9'
+services:
+  checkout_backend:
+    build: .
+    command: ["air"]
+    ports:
+      - 8004:8000
+    volumes:
+      - .:/app
+    depends_on:
+      - checkout_db
+    networks:
+      - checkout
+      - users
+
+  # checkout_queue:
+  #   build: .
+  #   command: "go run src/cmd/consumer.go"
+  #   depends_on:
+  #     - checkout_db
+  #   networks:
+  #     - checkout
+
+  checkout_db:
+    image: mysql:latest
+    restart: always
+    environment:
+      MYSQL_DATABASE: checkout
+      MYSQL_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - .dbdata:/var/lib/mysql
+    networks:
+      - checkout
+
+networks:
+  users:
+    external:
+      name: users
+  checkout:
