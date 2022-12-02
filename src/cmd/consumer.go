@@ -1,58 +1,77 @@
 package main
 
-// import (
-// 	"fmt"
-// 	"go-admin/src/database"
-// 	"go-admin/src/events"
-// 	"go-admin/src/models"
+import (
+	"fmt"
+	"go-checkout/src/database"
+	"go-checkout/src/events"
+	"go-checkout/src/models"
+	"os"
 
-// 	"github.com/confluentinc/confluent-kafka-go/kafka"
-// )
+	"github.com/confluentinc/confluent-kafka-go/kafka"
+)
 
-// func main() {
-// 	database.Connect()
-// 	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
-// 		"bootstrap.servers": "pkc-ew3qg.asia-southeast2.gcp.confluent.cloud:9092",
-// 		"security.protocol": "SASL_SSL",
-// 		"sasl.username":     "ZRITSDHTM4YORCX3",
-// 		"sasl.password":     "iOJVSZ5sHVRnmunF7VvCw+lC1iADXyNZGeYuVlZZfUlvcvUn4fotwbsxRoW2WY2W",
-// 		"sasl.mechanism":    "PLAIN",
-// 		"group.id":          "myGroup",
-// 		"auto.offset.reset": "earliest",
-// 	})
-// 	fmt.Println("START CONSUMING")
+const (
+	BOOTSRAP_SERVER = "BOOTSTRAP_SERVERS"
+	SERCURITY_PROTOCOL = "SECURITY_PROTOCOL"
+	SASL_USERNAME = "SASL_USERNAME"
+	SASL_PASSWORD = "SASL_PASSWORD"
+	SASL_MECHANISM = "SASL_MECHANISM"
+	KAFKA_TOPIC = "KAFKA_TOPIC"
+)
 
-// 	if err != nil {
-// 		panic(err)
-// 	}
+var (
+	bootstrap_server = os.Getenv(BOOTSRAP_SERVER)
+	security_protocol = os.Getenv(SERCURITY_PROTOCOL)
+	sasl_username = os.Getenv(SASL_USERNAME)
+	sasl_password = os.Getenv(SASL_PASSWORD)
+	sasl_mechanism = os.Getenv(SASL_MECHANISM)
+	kafka_topic = os.Getenv(KAFKA_TOPIC)
+)
 
-// 	consumer.SubscribeTopics([]string{"admin_topic"}, nil)
+func main() {
+	database.Connect()
+	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
+		"bootstrap.servers": bootstrap_server,
+		"security.protocol": security_protocol,
+		"sasl.username": sasl_username,
+		"sasl.password": sasl_password,
+		"sasl.mechanism": sasl_mechanism,
+		"group.id":          "myGroup",
+		"auto.offset.reset": "earliest",
+	})
+	fmt.Println("START CONSUMING")
 
-// 	fmt.Println("admin_topic")
+	if err != nil {
+		panic(err)
+	}
 
-// 	defer consumer.Close()
+	consumer.SubscribeTopics([]string{kafka_topic}, nil)
 
-// 	for {
-// 		msg, err := consumer.ReadMessage(-1)
-// 		if err != nil {
-// 			// The client will automatically try to recover from all errors.
-// 			fmt.Printf("Consumer error: %v (%v)\n", err, msg)
-// 			database.DB.Create(&models.KafkaError{
-// 				Key: msg.Key,
-// 				Value: msg.Value,
-// 				Error: err,
-// 			})
-// 			return
-// 		}
+	fmt.Println(kafka_topic)
 
-// 		fmt.Printf("Message on %s: %s\n", msg.TopicPartition, string(msg.Value))
+	defer consumer.Close()
 
-// 		if err := events.Listen(msg); err != nil {
-// 			database.DB.Create(&models.KafkaError{
-// 				Key: msg.Key,
-// 				Value: msg.Value,
-// 				Error: err,
-// 			})
-// 		}
-// 	}
-// }
+	for {
+		msg, err := consumer.ReadMessage(-1)
+		if err != nil {
+			// The client will automatically try to recover from all errors.
+			fmt.Printf("Consumer error: %v (%v)\n", err, msg)
+			database.DB.Create(&models.KafkaError{
+				Key: msg.Key,
+				Value: msg.Value,
+				Error: err,
+			})
+			return
+		}
+
+		fmt.Printf("Message on %s: %s\n", msg.TopicPartition, string(msg.Value))
+
+		if err := events.Listen(msg); err != nil {
+			database.DB.Create(&models.KafkaError{
+				Key: msg.Key,
+				Value: msg.Value,
+				Error: err,
+			})
+		}
+	}
+}

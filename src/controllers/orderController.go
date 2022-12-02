@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-checkout/src/database"
+	"go-checkout/src/events"
 	"go-checkout/src/models"
 	"go-checkout/src/services"
+	"os"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/gofiber/fiber/v2"
 	"github.com/stripe/stripe-go/v72"
 	"github.com/stripe/stripe-go/v72/checkout/session"
@@ -127,11 +128,12 @@ func CreateOrder(c *fiber.Ctx) error {
 		})
 	}
 
-	stripe.Key = "sk_test_51K5QrkDDnyyjj56qi762EJnYjpHkCxLxrjWt802tXYPSAQODfhk2xkN4pegZ1Ps4Qi0FrvEChMwwY74BLOywXBq700xRDXq6hv"
+	stripe.Key = os.Getenv("STRIPE_KEY")
+	checkout_url := os.Getenv("http://localhost:5000")
 
 	params := stripe.CheckoutSessionParams{
-		SuccessURL:         stripe.String("http://localhost:5000/success?source={CHECKOUT_SESSION_ID}"),
-		CancelURL:          stripe.String("http://localhost:5000/error"),
+		SuccessURL:         stripe.String(fmt.Sprintf("%s/success?source={CHECKOUT_SESSION_ID}",checkout_url)),
+		CancelURL:          stripe.String(fmt.Sprintf("%s/error",checkout_url)),
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
 		LineItems:          lineItems,
 	}
@@ -184,68 +186,33 @@ func CompleteOrder(c *fiber.Ctx) error {
 	order.Complete = true
 	database.DB.Save(&order)
 
-	go func(order models.Order) {
-		ambassadorRevenue := 0.0
-		adminRevenue := 0.0
+	ambassadorRevenue := 0.0
+	adminRevenue := 0.0
 
-		for _, item := range order.OrderItems {
-			ambassadorRevenue += item.AmbassadorRevenue
-			adminRevenue += item.AdminRevenue
-		}
+	for _, item := range order.OrderItems {
+		ambassadorRevenue += item.AmbassadorRevenue
+		adminRevenue += item.AdminRevenue
+	}
 
-		resp,err := services.UserService.Get(fmt.Sprintf("users/%d", order.UserId), "")
+	order.AdminRevenue = adminRevenue
+	order.AmbassadorRevenue = ambassadorRevenue
 
-		if err != nil {
-			panic(err)
-		}
-	
-		var user models.User
-	
-		json.NewDecoder(resp.Body).Decode(&user)
+	resp,err := services.UserService.Get(fmt.Sprintf("users/%d", order.UserId), "")
 
+	if err != nil {
+		return err
+	}
 
-		// database.Cache.ZIncrBy(context.Background(), "rankings", ambassadorRevenue, user.Name())
+	var user models.User
 
-		p, err := kafka.NewProducer(&kafka.ConfigMap{
-			"bootstrap.servers": "pkc-ew3qg.asia-southeast2.gcp.confluent.cloud:9092",
-			"security.protocol": "SASL_SSL",
-			"sasl.username": "ZRITSDHTM4YORCX3",
-			"sasl.password": "iOJVSZ5sHVRnmunF7VvCw+lC1iADXyNZGeYuVlZZfUlvcvUn4fotwbsxRoW2WY2W",
-			"sasl.mechanism": "PLAIN",
-		})
-		if err != nil {
-			panic(err)
-		}
-	
-		defer p.Close()
+	json.NewDecoder(resp.Body).Decode(&user)
 
-		topic := "email_topic"
+	order.AmbassadorName = user.Name()
 
-		message := map[string]interface{}{
-			"id": order.Id,
-			"ambassadorRevenue": ambassadorRevenue,
-			"adminRevenue": adminRevenue,
-			"code": order.Code,
-			"ambassadorEmail": order.AmbassadorEmail,
-		}
+	go events.Produce("admin_topic", order ,"order_created")
+	go events.Produce("ambassador_topic", order,"order_created")
+	go events.Produce("email_topic", order,"order_created")
 
-		value, _ := json.Marshal(message)
-
-		p.Produce(&kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-			Value:          value,
-		}, nil)
-
-		p.Flush(15000)
-
-		// ambassadorMessage := []byte(fmt.Sprintf("You earned $%f from the link #%s", ambassadorRevenue, order.Code))
-
-		// smtp.SendMail("host.docker.internal:1025", nil, "no-reply@email.com", []string{order.AmbassadorEmail}, ambassadorMessage)
-
-		// adminMessage := []byte(fmt.Sprintf("Order #%d with a total of $%f has been completed", order.Id, adminRevenue))
-
-		// smtp.SendMail("host.docker.internal:1025", nil, "no-reply@email.com", []string{"admin@admin.com"}, adminMessage)
-	}(order)
 
 	return c.JSON(fiber.Map{
 		"message": "success",

@@ -2,6 +2,7 @@ package main
 
 import (
 	"go-checkout/src/database"
+	"go-checkout/src/events"
 	"go-checkout/src/routes"
 	"go-checkout/src/services"
 	"log"
@@ -15,7 +16,7 @@ func main() {
 	database.AutoMigrate()
     app := fiber.New()
 	services.Setup()
-	// events.SetupProducer()
+	events.SetupProducer()
 
 	app.Use(cors.New(cors.Config{
 		AllowCredentials: true,
